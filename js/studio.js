@@ -322,17 +322,23 @@ window.renderFrame=function(fi){
   drawCaption(S,lt);
 };
 
-const Engine=(()=>{let raf=0,run=0;const at=fi=>renderFrame(Math.min(fi,TOTAL-1));
+const Engine=(()=>{let raf=0,run=0,ac=null,srcs=[];
+const AC=()=>ac||(ac=new(window.AudioContext||window.webkitAudioContext)());
+const stopAudio=()=>{srcs.forEach(n=>{try{n.stop()}catch{}});srcs=[]};
+const startAudio=(story,dest)=>{stopAudio();const a=AC();a.resume();const t0=a.currentTime+.05;story.shots.forEach(x=>{if(!x.audio)return;const n=a.createBufferSource();n.buffer=x.audio;n.connect(dest||a.destination);n.start(t0+x.start+.2);srcs.push(n)})};const at=fi=>renderFrame(Math.min(fi,TOTAL-1));
 return{canvas:c,
  load(s){return loadStory(s)},
- stop(){cancelAnimationFrame(raf);run++},
- play(story,{loop=true,onEnd}={}){this.stop();const dur=this.load(story),my=run;let st=performance.now();
-  const tick=now=>{if(my!==run)return;let t=(now-st)/1000;if(t>=dur){if(loop){st=now;t=0}else{at(TOTAL-1);onEnd&&onEnd();return}}at(Math.floor(t*FPS));raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick)},
+ stop(){cancelAnimationFrame(raf);run++;stopAudio()},
+ decode(ab){return AC().decodeAudioData(ab.slice(0))},
+ play(story,{loop=true,onEnd}={}){this.stop();const dur=this.load(story),my=run;let st=performance.now();startAudio(story);
+  const tick=now=>{if(my!==run)return;let t=(now-st)/1000;if(t>=dur){if(loop){st=now;t=0;startAudio(story)}else{at(TOTAL-1);onEnd&&onEnd();return}}at(Math.floor(t*FPS));raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick)},
  record(story,onProgress){return new Promise((res,rej)=>{this.stop();const dur=this.load(story),my=run;
-  const mime=['video/webm;codecs=vp9','video/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m));
+  const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp9','video/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m));
   if(!mime)return rej(new Error('Browser ini tidak mendukung perekaman video'));
-  const rec=new MediaRecorder(c.captureStream(FPS),{mimeType:mime,videoBitsPerSecond:6e6}),parts=[],st=performance.now();
-  rec.ondataavailable=e=>e.data.size&&parts.push(e.data);rec.onstop=()=>res(new Blob(parts,{type:'video/webm'}));rec.start();
+  const vs=c.captureStream(FPS);let dest=null;
+  if(story.shots.some(x=>x.audio)){dest=AC().createMediaStreamDestination();dest.stream.getAudioTracks().forEach(t=>vs.addTrack(t))}
+  const rec=new MediaRecorder(vs,{mimeType:mime,videoBitsPerSecond:6e6}),parts=[],st=performance.now();
+  rec.ondataavailable=e=>e.data.size&&parts.push(e.data);rec.onstop=()=>res(new Blob(parts,{type:'video/webm'}));rec.start();dest&&startAudio(story,dest);
   const tick=now=>{if(my!==run){rec.stop();return rej(new Error('Dibatalkan'))}const t=(now-st)/1000;onProgress&&onProgress(Math.min(1,t/dur));
    if(t>=dur){at(TOTAL-1);setTimeout(()=>rec.stop(),200);return}at(Math.floor(t*FPS));raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick)})},
  still(story,t,w=216,h=384){this.stop();this.load(story);at(Math.floor(t*FPS));const o=document.createElement('canvas');o.width=w;o.height=h;o.getContext('2d').drawImage(c,0,0,w,h);return o.toDataURL('image/jpeg',.7)},

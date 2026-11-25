@@ -9,15 +9,20 @@ Studio pembuat video animasi vertikal (9:16): tokoh kartun 2D di dunia 3D, naras
 
 Situs statis tanpa build. Jalankan lokal: `python3 -m http.server 8765` lalu buka `http://localhost:8765`. Tanpa konfigurasi, aplikasi berjalan di **mode lokal** (data di `localStorage`).
 
-## Menyambungkan Supabase ("Maroom-Studio")
-1. SQL Editor: jalankan `supabase/schema.sql` (tabel `series`, `episodes`, plus RLS).
-2. Authentication: aktifkan provider Email.
-3. Isi `config.js` dengan Project URL dan anon key (Project Settings → API). Jangan pakai service_role.
-4. AI naskah (opsional): `supabase secrets set ANTHROPIC_API_KEY=...` lalu `supabase functions deploy ai-script`. Tanpa ini, tombol "Buatkan naskah" memakai kerangka otomatis.
+## Supabase ("Maroom", ap-southeast-1)
+Sudah terpasang: tabel `series` dan `episodes` (RLS per pengguna), bucket privat `voice` untuk audio, dan edge function `ai-script` serta `tts`. `config.js` berisi URL dan kunci anon proyek. Untuk proyek baru: jalankan `supabase/schema.sql`, aktifkan login Email, deploy kedua fungsi, isi `config.js`.
+
+**Secret yang wajib diisi** (Dashboard → Edge Functions → Secrets), tanpa ini fungsinya membalas error 500:
+- `ELEVENLABS_API_KEY` untuk suara narasi (`tts`, model `eleven_multilingual_v2`, satu panggilan per kalimat, maks 300 karakter).
+- `ANTHROPIC_API_KEY` untuk naskah AI (`ai-script`). Tanpa ini tombol "Buatkan naskah" memakai kerangka otomatis.
+
+Suara dibuat di langkah Pratinjau, disimpan di bucket `voice` (`<user_id>/<episode_id>/<n>.mp3`), dan durasi adegan mengikuti panjang suara. Suara library ElevenLabs hanya bisa dipakai lewat API jika akunmu mengizinkan; daftar suara ada di `VOICES` di `js/app.js`.
+
+**Biaya:** setiap pengguna yang masuk bisa memicu pembuatan suara dan naskah dengan kreditmu. Matikan pendaftaran publik (Authentication → Sign In / Providers → "Allow new users to sign up") atau batasi penggunanya.
 
 ## Berkas
-`index.html`, `css/app.css`, `js/app.js` (layar + wizard + data), `js/studio.js` (mesin animasi WebGL2), `supabase/`.
+`index.html`, `css/app.css`, `js/app.js` (layar + wizard + data), `js/studio.js` (mesin animasi WebGL2), `supabase/` (schema, `functions/ai-script`, `functions/tts`).
 
 ## Batasan
-- Belum ada suara narasi; ekspor berupa video tanpa audio.
+- Suara hanya untuk pengguna yang masuk (butuh Supabase); mode lokal tanpa suara dan tanpa AI.
 - Ekspor merekam secara real-time (video 20 detik = 20 detik), butuh browser dengan WebGL2 dan MediaRecorder.

@@ -31,6 +31,7 @@ const HATS = [['cap', 'Baret'], ['bowler', 'Bowler'], ['tophat', 'Topi tinggi']]
 const HATC = { cap: '#2b3a55', bowler: '#2b2b33', tophat: '#2b2b33' };
 const COLORS = [['#2a9d8f', 'Hijau'], ['#e76f51', 'Merah'], ['#4361ee', 'Biru'], ['#f4a261', 'Oranye'], ['#7a3b9e', 'Ungu']];
 const TONES = ['Seru', 'Misterius', 'Lucu', 'Edukatif'];
+const VOICES = [['wMKUNhmaI6q0edIyjs4l', 'Reyy · pria, ramah dan tenang'], ['Bwqn6cc0SdnxwdEP80mf', 'Lucky Adrian · pria, bercerita'], ['EdRjgURk0bYsEI1FMHFI', 'Fry · pria, pendongeng dalam'], ['RPwoahKEr9WZSgNHBLbp', 'Dito · pria, narator tenang'], ['fbWrPiTR3TJJxRSdqryZ', 'Vidi · pria, enerjik'], ['zjmMdjff4JG35O3EQJBV', 'Mona · wanita, pendongeng'], ['m6elNOMAsoqePTs244dg', 'Indah · wanita, ekspresif'], ['DrldqYsaKOiBNak7yH5o', 'Damayanti · wanita, ceria']];
 const DEMO = 'Halo! Ini contoh gaya videonya. Tokoh kartun berjalan di dunia tiga dimensi. Siap membuat ceritamu?';
 
 /* ---------- naskah -> adegan (kamera & posisi tokoh bergantian) ---------- */
@@ -43,16 +44,21 @@ const PRE = [
   (h, g, e) => ({ cam: { p0: [.3, .8, 3.4], p1: [.9, 1.5, 5.6], t0: [0, 1.2, 0], t1: [0, 1.25, 0], f0: 50, f1: 56, r0: 0, r1: 0 }, chars: g ? [{ ...h, emo: e, pos: [-.6, 0, 0] }, { ...g, emo: 'smug', pos: [.7, 0, .1] }] : [{ ...h, emo: e, pos: [0, 0, 0] }] })
 ];
 const sentences = t => (String(t).replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]*/g) || []).map(x => x.trim()).filter(x => x.length > 1);
-function buildStory(d) {
+function buildStory(d, audio) {
   const st = sty(d.style);
   const h = { id: 1, talk: true, hat: d.hero.hat, hatColor: HATC[d.hero.hat], color: d.hero.color };
   const g = d.guest.on ? { id: 2, talk: false, flip: true, hat: d.guest.hat, hatColor: HATC[d.guest.hat], color: d.guest.color, vest: d.guest.hat === 'bowler' } : null;
   return { shots: sentences(d.script).map((text, i) => {
     const n = text.split(' ').length, last = text.slice(-1);
     const emo = last === '!' ? 'shock' : last === '?' ? 'sad' : i % 2 ? 'smug' : 'happy';
-    return { text, dur: Math.max(2.4, +(n * .4 + .7).toFixed(1)), world: st.world, env: st.env, ...PRE[i % PRE.length](h, g, emo) };
+    const b = audio?.[i]; // durasi adegan mengikuti panjang suara
+    return { text, dur: b ? +(b.duration + .45).toFixed(2) : Math.max(2.4, +(n * .4 + .7).toFixed(1)), audio: b, world: st.world, env: st.env, ...PRE[i % PRE.length](h, g, emo) };
   }) };
 }
+const akey = d => (d.voice || 'none') + '|' + d.script.trim();
+const abufs = d => d.voice && d.voice !== 'none' && W?.audio?.key === akey(d) ? W.audio.bufs : null;
+const mk = d => buildStory(d, abufs(d));
+const fnErr = async e => { try { return (await e.context.json()).error } catch { return e.message || String(e) } };
 const estDur = s => sentences(s).reduce((a, t) => a + Math.max(2.4, t.split(' ').length * .4 + .7), 0);
 
 /* ---------- data: Supabase bila dikonfigurasi, jika tidak localStorage ---------- */
@@ -78,6 +84,8 @@ async function saveEpisode(ep) {
 }
 async function removeEpisode(id) {
   if (sb && user) { const r = await sb.from('episodes').delete().eq('id', id); if (r.error) throw r.error; }
+  const gone = D.episodes.find(x => x.id === id);
+  if (sb && user && gone?.voice) sb.storage.from('voice').remove(sentences(gone.script).map((_, i) => `${user.id}/${id}/${i}.mp3`)); // best effort
   D.episodes = D.episodes.filter(x => x.id !== id); if (!sb) lsSet();
 }
 const nextNo = sid => Math.max(0, ...D.episodes.filter(e => e.series_id === sid).map(e => e.number)) + 1;
@@ -175,11 +183,11 @@ function openWizard(init = {}) {
   const first = D.series[0]?.id || 'new', sid = init.series_id || first;
   W = { step: init.id ? 1 : (init.mode || init.style ? 1 : 0), d: {
     id: init.id, mode: init.mode || 'own', title: '', script: '', topic: '', tone: 'Seru', scenes: 6, style: init.style || 'canyon',
-    hero: { hat: 'cap', color: '#2a9d8f' }, guest: { on: false, hat: 'bowler', color: '#f4a261' },
+    hero: { hat: 'cap', color: '#2a9d8f' }, guest: { on: false, hat: 'bowler', color: '#f4a261' }, voice: 'none',
     seriesId: sid, newSeries: '', number: sid === 'new' ? 1 : nextNo(sid), ...init, status: init.status } };
   wiz();
 }
-const STEPS = ['Cara membuat', 'Naskah', 'Gaya video', 'Tokoh', 'Episode', 'Pratinjau'];
+const STEPS = ['Cara membuat', 'Naskah', 'Gaya video', 'Tokoh & suara', 'Episode', 'Pratinjau'];
 function wiz() {
   const d = W.d, s = W.step; E && E.stop();
   let body = '', foot = `<button class="btn" data-act="wnext">${s === 5 ? 'Simpan episode' : 'Lanjut'}</button>`;
@@ -194,15 +202,16 @@ function wiz() {
   if (s === 3) body = `<div class="who"><img src="${E ? E.sprite({ hat: d.hero.hat, hatColor: HATC[d.hero.hat], color: d.hero.color, emo: 'happy' }) : ''}" alt="Tokoh utama"><div><div class="field"><span class="lbl">Topi</span><div class="opts">${HATS.map(h => `<button class="opt" data-act="what:${h[0]}" aria-pressed="${d.hero.hat === h[0]}">${h[1]}</button>`).join('')}</div></div></div></div>
     <div class="field"><span class="lbl">Warna baju</span><div class="opts">${COLORS.map(c => `<button class="sw" data-act="wcol:${c[0]}" aria-label="${c[1]}" aria-pressed="${d.hero.color === c[0]}"><i style="background:${c[0]}"></i></button>`).join('')}</div></div>
     <div class="sw-on"><span>Tambah tokoh kedua</span><button class="opt" role="switch" aria-checked="${d.guest.on}" data-act="wguest">${d.guest.on ? 'Aktif' : 'Mati'}</button></div>
+    ${sb && user ? `<label class="field"><span>Suara narasi (ElevenLabs)</span><select data-f="voice"><option value="none">Tanpa suara</option>${VOICES.map(v => `<option value="${v[0]}" ${d.voice === v[0] ? 'selected' : ''}>${esc(v[1])}</option>`).join('')}</select><span class="hint">Suara dibuat di langkah Pratinjau dan memakai kredit ElevenLabs.</span></label>` : '<p class="hint">Suara narasi tersedia setelah masuk dengan akun.</p>'}
     ${d.guest.on ? `<div class="field"><span class="lbl">Topi tokoh kedua</span><div class="opts">${HATS.map(h => `<button class="opt" data-act="wghat:${h[0]}" aria-pressed="${d.guest.hat === h[0]}">${h[1]}</button>`).join('')}</div></div>` : ''}`;
   if (s === 4) body = `<label class="field"><span>Seri</span><select data-f="seriesId">${D.series.map(x => `<option value="${x.id}" ${d.seriesId === x.id ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}<option value="new" ${d.seriesId === 'new' ? 'selected' : ''}>+ Seri baru…</option></select></label>
     ${d.seriesId === 'new' ? `<label class="field"><span>Nama seri baru</span><input data-f="newSeries" value="${esc(d.newSeries)}" maxlength="60"></label>` : ''}
     <label class="field"><span>Judul episode (Eps ${d.number})</span><input data-f="title" value="${esc(d.title)}" maxlength="80" placeholder="mis. Rel yang putus"></label>`;
-  if (s === 5) { body = stage() + `<div class="script">${esc(d.script)}</div>`; foot += `<button class="btn ghost" data-act="wexport">${ic('down', 20)} Ekspor video (.webm)</button>`; }
+  if (s === 5) { const vo = d.voice !== 'none' ? (abufs(d) ? `<p class="hint" style="text-align:center">Suara siap · ${sentences(d.script).length} kalimat</p>` : `<button class="btn ghost" style="margin-bottom:12px" data-act="wvoice">${ic('spark', 20)} Buat suara narasi (${d.script.trim().length} karakter)</button>`) : ''; body = vo + stage() + `<div class="script">${esc(d.script)}</div>`; foot += `<button class="btn ghost" data-act="wexport">${ic('down', 20)} Ekspor video (.webm)</button>`; }
   openSheet(`<header class="top"><button class="ib" data-act="wback" aria-label="${s ? 'Langkah sebelumnya' : 'Tutup'}">${ic(s ? 'back' : 'x')}</button><h2>${STEPS[s]}</h2><span class="ib"></span></header>
     <div class="steps" role="progressbar" aria-valuemin="1" aria-valuemax="6" aria-valuenow="${s + 1}" aria-label="Langkah ${s + 1} dari 6">${STEPS.map((_, i) => `<i class="${i <= s ? 'on' : ''}"></i>`).join('')}</div><div class="body">${body}</div><div class="foot">${foot}</div>`);
   if (s === 2) applyThumbs();
-  if (s === 5) mountStage(buildStory(d));
+  if (s === 5) mountStage(mk(d));
 }
 function fallbackScript(topic, n) {
   const L = [`Hari ini kita bahas ${topic}.`, 'Semuanya dimulai dari hal yang sangat sederhana.', 'Tapi tidak ada yang menyangka apa yang terjadi berikutnya.', `Ada sesuatu yang aneh tentang ${topic}!`, 'Apa sebenarnya yang tersembunyi di baliknya?', 'Ternyata jawabannya jauh lebih seru dari dugaan.', 'Satu per satu, semua petunjuk mulai terhubung.', 'Dan di sinilah ceritanya berubah total!', 'Sekarang kamu tahu rahasianya.', 'Ikuti terus episode berikutnya.'];
@@ -214,15 +223,41 @@ async function generate() {
   try {
     if (sb && user) { const r = await sb.functions.invoke('ai-script', { body: { topic: d.topic.trim(), tone: d.tone, scenes: d.scenes } }); if (r.error || !r.data?.script) throw r.error || new Error('kosong'); d.script = r.data.script; }
     else { d.script = fallbackScript(d.topic.trim(), d.scenes); toast('AI belum tersambung (Supabase belum diisi): memakai kerangka otomatis'); }
-  } catch (e) { d.script = fallbackScript(d.topic.trim(), d.scenes); toast('Fungsi AI gagal dipanggil: memakai kerangka otomatis'); }
+  } catch (e) { d.script = fallbackScript(d.topic.trim(), d.scenes); toast('AI gagal (' + await fnErr(e) + '): memakai kerangka otomatis'); }
   wiz();
+}
+async function genVoice() {
+  const d = W.d, parts = sentences(d.script), btn = $('[data-act=wvoice]');
+  if (parts.some(p => p.length > 300)) return toast('Satu kalimat maksimal 300 karakter');
+  btn.disabled = true; const raws = [];
+  try {
+    for (let i = 0; i < parts.length; i++) {
+      btn.textContent = `Membuat suara ${i + 1}/${parts.length}…`;
+      const r = await sb.functions.invoke('tts', { body: { text: parts[i], voice_id: d.voice } });
+      if (r.error || !(r.data instanceof Blob)) throw r.error || new Error('audio kosong');
+      raws.push(await r.data.arrayBuffer());
+    }
+    W.audio = { key: akey(d), raws, bufs: await Promise.all(raws.map(r => E.decode(r))) };
+  } catch (e) { toast('Gagal membuat suara: ' + await fnErr(e)); }
+  wiz();
+}
+async function loadAudio(e) {
+  if (!e.voice || !sb || !user) return null;
+  try {
+    const raws = await Promise.all(sentences(e.script).map(async (_, i) => { const r = await sb.storage.from('voice').download(`${user.id}/${e.id}/${i}.mp3`); if (r.error) throw r.error; return r.data.arrayBuffer(); }));
+    return { key: akey(e), raws, bufs: await Promise.all(raws.map(r => E.decode(r))) };
+  } catch { toast('Audio episode tidak bisa dimuat'); return null; }
 }
 async function saveEp(done) {
   const d = W.d; let sid = d.seriesId;
   if (sid === 'new') sid = (await saveSeries(d.newSeries.trim() || d.title.trim())).id;
-  const story = buildStory(d), dur = E ? E.load(story) : estDur(d.script), thumb = E ? E.still(story, Math.min(1.2, dur / 2)) : '';
-  const ep = { id: d.id || uid(), series_id: sid, number: d.number, title: d.title.trim(), script: d.script.trim(), style: d.style, hero: d.hero, guest: d.guest, status: done ? 'done' : (d.status || 'draft'), dur: +dur.toFixed(1), thumb, created_at: d.created_at || new Date().toISOString() };
-  await saveEpisode(ep); Object.assign(d, { id: ep.id, created_at: ep.created_at, seriesId: sid, status: ep.status }); return ep;
+  const voiced = d.voice !== 'none';
+  if (voiced && !abufs(d)) throw new Error('Buat suara narasi dulu di Pratinjau, atau pilih "Tanpa suara"');
+  const story = mk(d), dur = E ? E.load(story) : estDur(d.script), thumb = E ? E.still(story, Math.min(1.2, dur / 2)) : '';
+  const ep = { id: d.id || uid(), series_id: sid, number: d.number, title: d.title.trim(), script: d.script.trim(), style: d.style, hero: d.hero, guest: d.guest, voice: voiced ? d.voice : null, status: done ? 'done' : (d.status || 'draft'), dur: +dur.toFixed(1), thumb, created_at: d.created_at || new Date().toISOString() };
+  await saveEpisode(ep);
+  if (voiced) for (const [i, raw] of W.audio.raws.entries()) { const r = await sb.storage.from('voice').upload(`${user.id}/${ep.id}/${i}.mp3`, new Blob([raw], { type: 'audio/mpeg' }), { upsert: true, contentType: 'audio/mpeg' }); if (r.error) throw r.error; }
+  Object.assign(d, { id: ep.id, created_at: ep.created_at, seriesId: sid, status: ep.status }); return ep;
 }
 async function wnext() {
   const d = W.d, s = W.step;
@@ -241,11 +276,11 @@ async function exportVideo(story, saveAfter) {
   } catch (e) { toast('Ekspor gagal: ' + (e.message || e)); }
   b.disabled = false; b.innerHTML = `${ic('down', 20)} Ekspor video (.webm)`; E.play(story);
 }
-function openEp(id) {
-  const e = D.episodes.find(x => x.id === id), se = D.series.find(s => s.id === e.series_id), story = buildStory(e); W = { ep: e };
+async function openEp(id) {
+  const e = D.episodes.find(x => x.id === id), se = D.series.find(s => s.id === e.series_id); W = { ep: e };
   openSheet(`<header class="top"><button class="ib" data-act="close" aria-label="Tutup">${ic('x')}</button><h2>${esc(e.title)}</h2><span class="ib"></span></header><div class="body"><p class="hint" style="text-align:center">${esc(se?.title || '')} · Eps ${e.number} · ${esc(sty(e.style).name)}</p>${stage()}<div class="script">${esc(e.script)}</div></div>
   <div class="foot"><button class="btn" data-act="dexport">${ic('down', 20)} Ekspor video (.webm)</button><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn ghost" data-act="dedit">${ic('pen', 18)} Ubah</button><button class="btn danger" data-act="ddel">${ic('trash', 18)} Hapus</button></div></div>`);
-  mountStage(story);
+  W.audio = await loadAudio(e); if (W?.ep === e) mountStage(mk(e));
 }
 function demo(id) {
   const story = buildStory({ script: DEMO, style: id, hero: { hat: 'cap', color: '#2a9d8f' }, guest: { on: false } });
@@ -272,9 +307,10 @@ document.addEventListener('click', async ev => {
   else if (a === 'wgen') generate(); else if (a === 'wstyle') { d.style = v; wiz(); }
   else if (a === 'what') { d.hero.hat = v; wiz(); } else if (a === 'wcol') { d.hero.color = v; wiz(); }
   else if (a === 'wguest') { d.guest.on = !d.guest.on; wiz(); } else if (a === 'wghat') { d.guest.hat = v; wiz(); }
-  else if (a === 'wexport') exportVideo(buildStory(d), async () => { await saveEp(true); });
-  else if (a === 'dexport') { const e = W.ep; exportVideo(buildStory(e), async () => { e.status = 'done'; await saveEpisode(e); render(); }); }
-  else if (a === 'dedit') { const e = W.ep; closeSheet(); openWizard({ ...e, seriesId: e.series_id, mode: 'own' }); }
+  else if (a === 'wvoice') genVoice()
+  else if (a === 'wexport') exportVideo(mk(d), async () => { await saveEp(true); });
+  else if (a === 'dexport') { const e = W.ep; exportVideo(mk(e), async () => { e.status = 'done'; await saveEpisode(e); render(); }); }
+  else if (a === 'dedit') { const e = W.ep, au = W.audio; closeSheet(); openWizard({ ...e, seriesId: e.series_id, mode: 'own', voice: e.voice || 'none' }); W.audio = au; }
   else if (a === 'ddel') { if (confirm('Hapus episode ini?')) { try { await removeEpisode(W.ep.id); closeSheet(); render(); toast('Episode dihapus'); } catch (e) { toast('Gagal menghapus') } } }
 });
 document.addEventListener('input', ev => {
